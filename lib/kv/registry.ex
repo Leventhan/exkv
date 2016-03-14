@@ -5,8 +5,8 @@ defmodule KV.Registry do
   ## Client API
   # Starts a GenServer process linked to the current process.
   # http://elixir-lang.org/docs/stable/elixir/GenServer.html#start_link/3
-  def start_link() do
-    GenServer.start_link(__MODULE__, :ok, [])
+  def start_link(name) do
+    GenServer.start_link(__MODULE__, :ok, name: name)
   end
 
   # Looks up the process pid from a given process name
@@ -44,7 +44,7 @@ defmodule KV.Registry do
     if Map.has_key?(names, name) do
       {:noreply, {names, refs}}
     else
-      {:ok, pid} = KV.Bucket.start_link()
+      {:ok, pid} = KV.Bucket.Supervisor.start_bucket()
       ref = Process.monitor(pid) # Unlike bi-directional process links, a uni-directional monitor will not crash if the other side crashes
       refs = Map.put(refs, ref, name)
       names = Map.put(names, name, pid)
