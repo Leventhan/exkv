@@ -25,25 +25,44 @@ defmodule KV.Registry do
   # Receives the argument given to start_link() (:ok)
   # http://elixir-lang.org/docs/stable/elixir/GenServer.html#c:init/1
   def init(:ok) do
-    {:ok, %{}}
+    names = %{}
+    refs = %{}
+    {:ok, {names, refs}}
   end
 
+  # Handle looking up a bucket's pid given its name
   # _from refers to the process pid we received the request from (client)
-  # names refers to the current server state
-  def handle_call({:lookup, name}, _from, names) do
-    {:reply, Map.fetch(names, name), names} # {status code, what is sent to client, new server state}
+  # the third (last) parameter is the new state of the genserver
+  # handle_call is used for synchronous requests where you want to wait for a server reply
+  def handle_call({:lookup, name}, _from, {names, _} = state) do
+    {:reply, Map.fetch(names, name), state} # {status code, what is sent to client, new server state}
   end
 
-  def handle_cast({:create,name}, names) do
+  # Handle creating entries in bucket registry
+  # handle_cast is used for async requests (fire and forget)
+  def handle_cast({:create,name}, {names, refs}) do
     if Map.has_key?(names, name) do
-      {:noreply, names}
+      {:noreply, {names, refs}}
     else
-      {:ok, bucket} = KV.Bucket.start_link()
-      {:noreply, Map.put(names, name, bucket)}
+      {:ok, pid} = KV.Bucket.start_link()
+      ref = Process.monitor(pid) # Unlike bi-directional process links, a uni-directional monitor will not crash if the other side crashes
+      refs = Map.put(refs, ref, name)
+      names = Map.put(names, name, pid)
+      {:noreply, {names, refs}}
     end
   end
 
+  # Handle listening to DOWN messages from downed buckets
+  # handle_info is used for all other messages not sent via call or cast (i.e. via send)
+  def handle_info({:DOWN, ref, :process, _pid, _reason}, {names, refs}) do
+    {name, refs} = Map.pop(refs, ref)
+    names = Map.delete(names, name)
+    {:noreply, {names, refs}}
+  end
 
-
-
+  # Catch all other messages, including the ones sent via send
+  # Unexpected messages may arrive, so we define this catch-all clause
+  def handle_info(_msg, state) do
+    {:noreply, state}
+  end
 end
